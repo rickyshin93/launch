@@ -111,7 +111,7 @@ struct EditorConfig {
 |------|------|
 | `launch <project>` | 启动项目环境 |
 | `launch stop <project>` | 停止项目所有服务 |
-| `launch stop --all` | 停止所有项目 |
+| `launch stop --all` | 遍历 `~/.launch/state/` 下所有 JSON，逐个执行 stop 流程 |
 | `launch list` | 列出所有项目及运行状态 |
 | `launch edit <project>` | 用 $EDITOR 打开配置文件 |
 | `launch new <project>` | 创建配置模板 |
@@ -154,7 +154,7 @@ struct EditorConfig {
 
 - **默认 vertical**（左右排列）— 每个 pane 保留完整高度，适合看日志
 - **可选 grid**（2x2 网格）— 先左右分，再各自上下分
-- 超过 4 个 pane 时：vertical 模式照常左右排列；grid 模式下超出 4 个的 pane 追加为 vertical split
+- 超过 4 个 pane 时：vertical 模式照常左右排列；grid 模式下超出 4 个的 pane 对最后一个 session 追加 vertical split
 
 ### AppleScript 实现
 
@@ -202,7 +202,7 @@ echo $$ > /tmp/.launch_<project>_<pane>.pid && exec <cmd>
 
 `exec` 会替换当前 shell 进程，但保留同一个 PID，所以 pid 文件中记录的值就是最终运行的进程 PID。
 
-启动后 Rust 侧短暂等待（~500ms），然后读取 pid 文件，写入 state JSON，最后删除临时 pid 文件。
+启动后 Rust 侧轮询等待 pid 文件出现（每 100ms 检查一次，最多等 3 秒），读取后写入 state JSON，最后删除临时 pid 文件。
 
 ### 进程 Kill 策略
 
