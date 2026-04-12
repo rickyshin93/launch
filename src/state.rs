@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -26,33 +27,32 @@ pub fn state_path(project: &str) -> PathBuf {
 }
 
 /// Save project state to JSON
-pub fn save(state: &ProjectState) -> Result<(), String> {
+pub fn save(state: &ProjectState) -> Result<()> {
     let path = state_path(&state.project);
-    let json = serde_json::to_string_pretty(state)
-        .map_err(|e| format!("Failed to serialize state: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Failed to write state {}: {e}", path.display()))?;
+    let json = serde_json::to_string_pretty(state).context("Failed to serialize state")?;
+    fs::write(&path, json).with_context(|| format!("Failed to write state {}", path.display()))?;
     Ok(())
 }
 
 /// Load project state from JSON
-pub fn load(project: &str) -> Result<Option<ProjectState>, String> {
+pub fn load(project: &str) -> Result<Option<ProjectState>> {
     let path = state_path(project);
     if !path.exists() {
         return Ok(None);
     }
     let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read state {}: {e}", path.display()))?;
+        .with_context(|| format!("Failed to read state {}", path.display()))?;
     let state: ProjectState = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse state {}: {e}", path.display()))?;
+        .with_context(|| format!("Failed to parse state {}", path.display()))?;
     Ok(Some(state))
 }
 
 /// Delete state file
-pub fn remove(project: &str) -> Result<(), String> {
+pub fn remove(project: &str) -> Result<()> {
     let path = state_path(project);
     if path.exists() {
         fs::remove_file(&path)
-            .map_err(|e| format!("Failed to remove state {}: {e}", path.display()))?;
+            .with_context(|| format!("Failed to remove state {}", path.display()))?;
     }
     Ok(())
 }
@@ -67,7 +67,7 @@ pub fn is_pid_alive(pid: u32) -> bool {
 }
 
 /// Check if any PID in the state is still alive
-pub fn is_running(project: &str) -> Result<bool, String> {
+pub fn is_running(project: &str) -> Result<bool> {
     match load(project)? {
         None => Ok(false),
         Some(state) => Ok(state.panes.iter().any(|p| is_pid_alive(p.pid))),
@@ -132,7 +132,6 @@ mod tests {
 
     #[test]
     fn dead_pid_is_not_alive() {
-        // PID 99999 is very unlikely to be running
         assert!(!is_pid_alive(99999));
     }
 

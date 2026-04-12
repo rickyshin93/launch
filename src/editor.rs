@@ -1,10 +1,11 @@
+use anyhow::{Context, Result};
 use std::process::Command;
 
 use crate::config::EditorConfig;
 
 /// Open editor with the configured folders.
 /// Skips if editor section is None or folders is empty.
-pub fn open(editor: Option<&EditorConfig>) -> Result<(), String> {
+pub fn open(editor: Option<&EditorConfig>) -> Result<()> {
     let Some(editor) = editor else {
         return Ok(());
     };
@@ -19,7 +20,7 @@ pub fn open(editor: Option<&EditorConfig>) -> Result<(), String> {
     Command::new(cmd)
         .args(folders)
         .spawn()
-        .map_err(|e| format!("Failed to launch editor '{cmd}': {e}"))?;
+        .with_context(|| format!("Failed to launch editor '{cmd}'"))?;
 
     Ok(())
 }

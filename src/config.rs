@@ -1,3 +1,4 @@
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -41,26 +42,26 @@ pub fn config_path(name: &str) -> PathBuf {
 }
 
 /// Ensure ~/.launch/ and ~/.launch/state/ directories exist
-pub fn ensure_dirs() -> std::io::Result<()> {
+pub fn ensure_dirs() -> Result<()> {
     let base = launch_dir();
-    fs::create_dir_all(&base)?;
-    fs::create_dir_all(base.join("state"))?;
+    fs::create_dir_all(&base).context("Failed to create ~/.launch/")?;
+    fs::create_dir_all(base.join("state")).context("Failed to create ~/.launch/state/")?;
     Ok(())
 }
 
 /// Load and parse a project config, expanding ~ paths
-pub fn load(name: &str) -> Result<Config, String> {
+pub fn load(name: &str) -> Result<Config> {
     let path = config_path(name);
     if !path.exists() {
-        return Err(format!(
+        bail!(
             "Config file not found: {}\nRun `launch new {name}` to create one.",
             path.display(),
-        ));
+        );
     }
     let content =
-        fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
     let mut config: Config = serde_yaml::from_str(&content)
-        .map_err(|e| format!("Failed to parse {}: {e}", path.display()))?;
+        .with_context(|| format!("Failed to parse {}", path.display()))?;
     expand_paths(&mut config);
     Ok(config)
 }
@@ -100,11 +101,11 @@ pub fn list_projects() -> Vec<String> {
 }
 
 /// Generate a template YAML config for a new project
-pub fn create_template(name: &str) -> Result<PathBuf, String> {
-    ensure_dirs().map_err(|e| format!("Failed to create directories: {e}"))?;
+pub fn create_template(name: &str) -> Result<PathBuf> {
+    ensure_dirs()?;
     let path = config_path(name);
     if path.exists() {
-        return Err(format!("Config already exists: {}", path.display()));
+        bail!("Config already exists: {}", path.display());
     }
     let template = format!(
         r#"name: {name}
@@ -122,7 +123,7 @@ editor:
 #   - http://localhost:3000
 "#,
     );
-    fs::write(&path, &template).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    fs::write(&path, &template).with_context(|| format!("Failed to write {}", path.display()))?;
     Ok(path)
 }
 
@@ -161,7 +162,7 @@ browser:
         assert_eq!(iterm.layout, Some("grid".to_string()));
         assert_eq!(iterm.panes.len(), 3);
         assert_eq!(iterm.panes[0].cmd, Some("npm run dev".to_string()));
-        assert_eq!(iterm.panes[2].cmd, None); // git pane has no cmd
+        assert_eq!(iterm.panes[2].cmd, None);
 
         let editor = config.editor.unwrap();
         assert_eq!(editor.cmd, Some("cursor".to_string()));
@@ -255,14 +256,12 @@ iterm:
 
         let config = load(name).unwrap();
         assert_eq!(config.name, name);
-        // paths should be expanded
         if let Some(iterm) = &config.iterm {
             for pane in &iterm.panes {
                 assert!(!pane.dir.contains('~'));
             }
         }
 
-        // duplicate should fail
         assert!(create_template(name).is_err());
 
         let _ = fs::remove_file(&path);

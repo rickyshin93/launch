@@ -1,3 +1,4 @@
+use anyhow::{bail, Context, Result};
 use std::io::{self, Write};
 use std::process::Command;
 use std::thread;
@@ -8,8 +9,8 @@ use colored::Colorize;
 use crate::{browser, config, editor, git, iterm, port, state};
 
 /// Main launch flow for a project
-pub fn launch(name: &str) -> Result<(), String> {
-    config::ensure_dirs().map_err(|e| e.to_string())?;
+pub fn launch(name: &str) -> Result<()> {
+    config::ensure_dirs()?;
     let cfg = config::load(name)?;
 
     // Check if already running
@@ -155,7 +156,7 @@ fn poll_pid_file(path: &str) -> Option<u32> {
 }
 
 /// Stop a project: kill processes, close iTerm2 tabs, remove state
-pub fn stop(name: &str) -> Result<(), String> {
+pub fn stop(name: &str) -> Result<()> {
     match state::load(name)? {
         None => {
             println!("Project '{name}' is not running.");
@@ -168,14 +169,14 @@ pub fn stop(name: &str) -> Result<(), String> {
         }
     }
 
-    iterm::close_tabs(name)?;
+    iterm::close_tabs(name);
     state::remove(name)?;
     println!("{}", format!("Project '{name}' stopped.").green());
     Ok(())
 }
 
 /// Stop all running projects
-pub fn stop_all() -> Result<(), String> {
+pub fn stop_all() -> Result<()> {
     let projects = state::running_projects();
     if projects.is_empty() {
         println!("No projects are running.");
@@ -190,7 +191,6 @@ pub fn stop_all() -> Result<(), String> {
 /// Kill a process group: SIGTERM first, wait 3s, then SIGKILL if needed
 #[allow(clippy::similar_names)]
 fn kill_process_group(pid: u32) {
-    // Get PGID
     let pgid = Command::new("ps")
         .args(["-o", "pgid=", "-p", &pid.to_string()])
         .output()
@@ -211,20 +211,17 @@ fn kill_process_group(pid: u32) {
         None => pid.to_string(),
     };
 
-    // SIGTERM
     let _ = Command::new("kill").args(["--", &target]).output();
-
     thread::sleep(Duration::from_secs(3));
 
-    // Check if still alive, SIGKILL if needed
     if state::is_pid_alive(pid) {
         let _ = Command::new("kill").args(["-9", "--", &target]).output();
     }
 }
 
 /// List all projects and their status
-pub fn list() -> Result<(), String> {
-    config::ensure_dirs().map_err(|e| e.to_string())?;
+pub fn list() -> Result<()> {
+    config::ensure_dirs()?;
     let projects = config::list_projects();
 
     if projects.is_empty() {
@@ -258,25 +255,25 @@ pub fn list() -> Result<(), String> {
 }
 
 /// Edit a project config in $EDITOR
-pub fn edit(name: &str) -> Result<(), String> {
+pub fn edit(name: &str) -> Result<()> {
     let path = config::config_path(name);
     if !path.exists() {
-        return Err(format!(
+        bail!(
             "Config not found: {}\nRun `launch new {name}` to create one.",
             path.display(),
-        ));
+        );
     }
 
     let editor_cmd = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
     Command::new(&editor_cmd)
         .arg(path.to_str().unwrap())
         .status()
-        .map_err(|e| format!("Failed to open editor '{editor_cmd}': {e}"))?;
+        .with_context(|| format!("Failed to open editor '{editor_cmd}'"))?;
     Ok(())
 }
 
 /// Create a new project config from template
-pub fn new_project(name: &str) -> Result<(), String> {
+pub fn new_project(name: &str) -> Result<()> {
     let path = config::create_template(name)?;
     println!("{}", format!("Created config: {}", path.display()).green());
 
@@ -284,6 +281,59 @@ pub fn new_project(name: &str) -> Result<(), String> {
     Command::new(&editor_cmd)
         .arg(path.to_str().unwrap())
         .status()
-        .map_err(|e| format!("Failed to open editor '{editor_cmd}': {e}"))?;
+        .with_context(|| format!("Failed to open editor '{editor_cmd}'"))?;
     Ok(())
+}
+
+/// Check environment for common issues
+#[allow(clippy::unnecessary_wraps)]
+pub fn doctor() -> Result<()> {
+    use std::path::Path;
+
+    println!("launch doctor\n");
+
+    // Check iTerm2
+    let iterm_installed = Path::new("/Applications/iTerm.app").exists();
+    print_check(iterm_installed, "iTerm2 installed");
+
+    // Check ~/.launch/ directory
+    let launch_dir_exists = config::launch_dir().exists();
+    print_check(launch_dir_exists, "~/.launch/ directory exists");
+
+    // Check project count
+    let projects = config::list_projects();
+    println!("  {} {} project(s) configured", "i".blue(), projects.len());
+
+    // Check git
+    let git_ok = Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    print_check(git_ok, "git available");
+
+    // Check lsof
+    let lsof_ok = Command::new("lsof")
+        .arg("-v")
+        .output()
+        .map(|_| true)
+        .unwrap_or(false);
+    print_check(lsof_ok, "lsof available");
+
+    println!();
+    if iterm_installed && git_ok && lsof_ok {
+        println!("{}", "All checks passed!".green());
+    } else {
+        println!("{}", "Some checks failed. See above.".yellow());
+    }
+
+    Ok(())
+}
+
+fn print_check(ok: bool, label: &str) {
+    if ok {
+        println!("  {} {label}", "✓".green());
+    } else {
+        println!("  {} {label}", "✗".red());
+    }
 }

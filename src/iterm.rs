@@ -1,9 +1,10 @@
+use anyhow::{bail, Context, Result};
 use std::process::Command;
 
 use crate::config::PaneConfig;
 
 /// Open a new iTerm2 tab with panes arranged according to layout.
-pub fn open_panes(project: &str, panes: &[PaneConfig], layout: &str) -> Result<(), String> {
+pub fn open_panes(project: &str, panes: &[PaneConfig], layout: &str) -> Result<()> {
     if panes.is_empty() {
         return Ok(());
     }
@@ -33,14 +34,12 @@ fn build_vertical_script(project: &str, panes: &[PaneConfig]) -> String {
     s.push_str("  end if\n");
     s.push_str("  tell current window\n");
 
-    // Split N-1 times on the first session
     for _ in 1..n {
         s.push_str("    tell first session of theTab\n");
         s.push_str("      split vertically with default profile\n");
         s.push_str("    end tell\n");
     }
 
-    // Configure each session
     for (i, pane) in panes.iter().enumerate() {
         append_pane_config(&mut s, project, pane, i + 1);
     }
@@ -72,24 +71,20 @@ fn build_grid_script(project: &str, panes: &[PaneConfig]) -> String {
     s.push_str("  end if\n");
     s.push_str("  tell current window\n");
 
-    // Split vertically (left | right)
     s.push_str("    tell first session of theTab\n");
     s.push_str("      split vertically with default profile\n");
     s.push_str("    end tell\n");
 
-    // Split left horizontally (top-left | bottom-left)
     s.push_str("    tell first session of theTab\n");
     s.push_str("      split horizontally with default profile\n");
     s.push_str("    end tell\n");
 
-    // If 4+ panes, split right horizontally
     if n >= 4 {
         s.push_str("    tell last session of theTab\n");
         s.push_str("      split horizontally with default profile\n");
         s.push_str("    end tell\n");
     }
 
-    // If 5+ panes, add extras as vertical splits on last session
     for _ in 4..n {
         s.push_str("    tell last session of theTab\n");
         s.push_str("      split vertically with default profile\n");
@@ -129,8 +124,7 @@ fn build_pane_command(project: &str, pane: &PaneConfig) -> String {
 }
 
 /// Close iTerm2 tabs whose sessions have names starting with "[project]"
-#[allow(clippy::unnecessary_wraps)]
-pub fn close_tabs(project: &str) -> Result<(), String> {
+pub fn close_tabs(project: &str) {
     let prefix = format!("[{project}]");
     let script = format!(
         r#"tell application "iTerm2"
@@ -153,21 +147,19 @@ pub fn close_tabs(project: &str) -> Result<(), String> {
 end tell"#,
     );
 
-    // Ignore errors — tab may already be closed
     let _ = run_applescript(&script);
-    Ok(())
 }
 
 /// Execute an `AppleScript` string via osascript
-fn run_applescript(script: &str) -> Result<(), String> {
+fn run_applescript(script: &str) -> Result<()> {
     let output = Command::new("osascript")
         .args(["-e", script])
         .output()
-        .map_err(|e| format!("Failed to run osascript: {e}"))?;
+        .context("Failed to run osascript")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("AppleScript error: {stderr}"));
+        bail!("AppleScript error: {stderr}");
     }
     Ok(())
 }
@@ -209,7 +201,6 @@ mod tests {
             test_pane("c", "/tmp/c", None),
         ];
         let script = build_vertical_script("proj", &panes);
-        // Should have 2 splits for 3 panes
         assert_eq!(script.matches("split vertically").count(), 2);
         assert!(script.contains("[proj] a"));
         assert!(script.contains("[proj] b"));
@@ -225,7 +216,6 @@ mod tests {
             test_pane("d", "/tmp/d", Some("echo d")),
         ];
         let script = build_grid_script("proj", &panes);
-        // Grid: 1 vertical + 2 horizontal splits
         assert_eq!(script.matches("split vertically").count(), 1);
         assert_eq!(script.matches("split horizontally").count(), 2);
     }
@@ -237,14 +227,12 @@ mod tests {
             test_pane("b", "/tmp/b", Some("echo b")),
         ];
         let script = build_grid_script("proj", &panes);
-        // Should use vertical layout (1 split)
         assert_eq!(script.matches("split vertically").count(), 1);
         assert_eq!(script.matches("split horizontally").count(), 0);
     }
 
     #[test]
     fn empty_panes_is_ok() {
-        // Should not panic or error
         assert!(open_panes("proj", &[], "vertical").is_ok());
     }
 }

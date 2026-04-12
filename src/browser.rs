@@ -1,7 +1,8 @@
+use anyhow::{Context, Result};
 use std::process::Command;
 
 /// Open a list of URLs in the default browser using `open` command.
-pub fn open(urls: Option<&Vec<String>>) -> Result<(), String> {
+pub fn open(urls: Option<&Vec<String>>) -> Result<()> {
     let Some(urls) = urls.filter(|u| !u.is_empty()) else {
         return Ok(());
     };
@@ -10,7 +11,7 @@ pub fn open(urls: Option<&Vec<String>>) -> Result<(), String> {
         Command::new("open")
             .arg(url)
             .spawn()
-            .map_err(|e| format!("Failed to open URL '{url}': {e}"))?;
+            .with_context(|| format!("Failed to open URL '{url}'"))?;
     }
 
     Ok(())
