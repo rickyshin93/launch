@@ -6,3 +6,4 @@ pub mod iterm;
 pub mod port;
 pub mod process;
 pub mod state;
+pub mod tmux;

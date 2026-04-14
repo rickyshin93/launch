@@ -104,23 +104,12 @@ fn build_grid_script(project: &str, panes: &[PaneConfig]) -> String {
 #[allow(clippy::format_push_string)]
 fn append_pane_config(s: &mut String, project: &str, pane: &PaneConfig, index: usize) {
     let title = format!("[{project}] {}", pane.name);
-    let cmd = build_pane_command(project, pane);
+    let cmd = pane.build_command(project);
     let escaped_cmd = cmd.replace('\\', "\\\\").replace('"', "\\\"");
     s.push_str(&format!("    tell item {index} of sessions of theTab\n"));
     s.push_str(&format!("      set name to \"{title}\"\n"));
     s.push_str(&format!("      write text \"{escaped_cmd}\"\n"));
     s.push_str("    end tell\n");
-}
-
-/// Build the shell command string for a pane.
-fn build_pane_command(project: &str, pane: &PaneConfig) -> String {
-    match &pane.cmd {
-        Some(cmd) => {
-            let pid_file = format!("/tmp/.on_{project}_{}.pid", pane.name);
-            format!("cd {} && echo $$ > {pid_file} && exec {cmd}", pane.dir)
-        }
-        None => format!("cd {}", pane.dir),
-    }
 }
 
 /// Close iTerm2 tabs whose sessions have names starting with "[project]"
@@ -174,23 +163,6 @@ mod tests {
             dir: dir.to_string(),
             cmd: cmd.map(String::from),
         }
-    }
-
-    #[test]
-    fn pane_command_with_cmd() {
-        let pane = test_pane("dev", "/tmp/test", Some("npm run dev"));
-        let cmd = build_pane_command("myproject", &pane);
-        assert!(cmd.contains("cd /tmp/test"));
-        assert!(cmd.contains("echo $$"));
-        assert!(cmd.contains(".on_myproject_dev.pid"));
-        assert!(cmd.contains("exec npm run dev"));
-    }
-
-    #[test]
-    fn pane_command_without_cmd() {
-        let pane = test_pane("shell", "/tmp/test", None);
-        let cmd = build_pane_command("myproject", &pane);
-        assert_eq!(cmd, "cd /tmp/test");
     }
 
     #[test]

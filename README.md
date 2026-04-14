@@ -1,17 +1,19 @@
 # on
 
-A macOS CLI tool to restore your full dev environment with one command.
+A CLI tool to restore your full dev environment with one command.
 
 Stop manually opening terminals, editors, and browsers every time you start working — `on` does it all from a single YAML config.
 
 ## Install
+
+**macOS (Homebrew):**
 
 ```bash
 brew tap rickyshin93/tap
 brew install rickyshin93/tap/on
 ```
 
-Or build from source:
+**From source (macOS / Linux):**
 
 ```bash
 cargo install --path .
@@ -48,7 +50,8 @@ Configs live in `~/.on/<project>.yaml`:
 
 ```yaml
 name: myproject
-iterm:
+terminal:
+  type: tmux    # iterm | tmux (default: iterm on macOS, tmux on Linux)
   layout: vertical  # vertical (default) | grid
   panes:
     - name: frontend
@@ -64,6 +67,7 @@ editor:
   folders:
     - ~/projects/myproject/frontend
     - ~/projects/myproject/backend
+  # workspace: ~/.on/myproject.code-workspace
 browser:
   - http://localhost:3000
   - https://github.com/me/myproject
@@ -71,9 +75,9 @@ browser:
 
 ## Features
 
-- **iTerm2 Panes** — Opens a tab per project, splits panes with auto-naming `[project] pane`
-- **Layouts** — `vertical` (side-by-side, default) or `grid` (2x2)
-- **Editor** — Opens configured editor (`code`, `cursor`, etc.) with project folders
+- **Terminal Panes** — iTerm2 (macOS) or tmux (macOS/Linux), with auto-naming
+- **Layouts** — `vertical` (side-by-side, default) or `grid` (tiled)
+- **Editor** — Opens configured editor with folders or workspace file
 - **Browser** — Opens URLs in default browser
 - **Port Conflict Detection** — Auto-detects ports from URLs/commands, warns on conflicts
 - **Git Status** — Warns about uncommitted changes before launch
@@ -82,8 +86,8 @@ browser:
 
 ## Requirements
 
-- macOS
-- [iTerm2](https://iterm2.com/)
+- macOS or Linux
+- [tmux](https://github.com/tmux/tmux) and/or [iTerm2](https://iterm2.com/) (macOS)
 
 ## License
 

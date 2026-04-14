@@ -2,9 +2,10 @@
 
 ## Project Overview
 
-`on` — A macOS CLI tool to restore your full dev environment with one command (iTerm2 panes, editor, browser).
+`on` — A CLI tool to restore your full dev environment with one command (terminal panes, editor, browser).
 
 - Language: Rust (edition 2021)
+- Platforms: macOS, Linux
 - Build: `cargo build`
 - Test: `cargo test`
 - Lint: `cargo clippy -- -D warnings`
@@ -24,21 +25,24 @@ src/
   main.rs          — CLI entry point (clap)
   lib.rs           — Library entry point
   config.rs        — YAML config parsing (~/.on/<project>.yaml)
-  commands.rs      — Process tracking (PID)
+  process.rs       — Process orchestration & PID tracking
   state.rs         — Runtime state management
-  checks/
-    mod.rs         — Checks module
-    git.rs         — Git status checks
-    port.rs        — Port conflict detection
-  launcher/
-    mod.rs         — Launcher module
-    iterm.rs       — iTerm2 AppleScript integration
-    editor.rs      — Editor launching
-    browser.rs     — Browser opening
+  iterm.rs         — iTerm2 AppleScript backend (macOS)
+  tmux.rs          — tmux backend (macOS/Linux)
+  editor.rs        — Editor launching
+  browser.rs       — Browser opening (open/xdg-open)
+  git.rs           — Git status checks
+  port.rs          — Port conflict detection
 ```
+
+## Terminal Backends
+
+- **iTerm2** — macOS only, uses AppleScript via `osascript`
+- **tmux** — cross-platform, uses `tmux` CLI commands
+- Config `terminal.type` selects backend (default: `iterm` on macOS, `tmux` on Linux)
 
 ## Notes
 
-- macOS + iTerm2 only
 - Config path: `~/.on/<project>.yaml`
+- Legacy `iterm:` config key still supported (auto-converted to `terminal:`)
 - Keep README.md in sync when changing CLI arguments

@@ -1,0 +1,103 @@
+use anyhow::{bail, Context, Result};
+use std::process::Command;
+
+use crate::config::PaneConfig;
+
+/// Create a tmux session with panes arranged according to layout (non-blocking)
+pub fn open_panes(project: &str, panes: &[PaneConfig], layout: &str) -> Result<()> {
+    if panes.is_empty() {
+        return Ok(());
+    }
+
+    let session = session_name(project);
+
+    // Kill stale session if it exists
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", &session])
+        .output();
+
+    // Create new detached session with first pane
+    let status = Command::new("tmux")
+        .args(["new-session", "-d", "-s", &session, "-n", project])
+        .status()
+        .context("Failed to start tmux. Is tmux installed?")?;
+
+    if !status.success() {
+        bail!("Failed to create tmux session '{session}'");
+    }
+
+    // Split additional panes
+    for _ in 1..panes.len() {
+        let _ = Command::new("tmux")
+            .args(["split-window", "-t", &session])
+            .status();
+    }
+
+    // Apply layout
+    let tmux_layout = match layout {
+        "grid" => "tiled",
+        _ => "even-horizontal",
+    };
+    let _ = Command::new("tmux")
+        .args(["select-layout", "-t", &session, tmux_layout])
+        .status();
+
+    // Send commands to each pane
+    for (i, pane) in panes.iter().enumerate() {
+        let target = format!("{session}:0.{i}");
+        let cmd = pane.build_command(project);
+        let _ = Command::new("tmux")
+            .args(["send-keys", "-t", &target, &cmd, "Enter"])
+            .status();
+    }
+
+    Ok(())
+}
+
+/// Attach to or switch to the tmux session (blocking)
+pub fn attach(project: &str) -> Result<()> {
+    let session = session_name(project);
+
+    if std::env::var("TMUX").is_ok() {
+        // Already inside tmux — switch client
+        Command::new("tmux")
+            .args(["switch-client", "-t", &session])
+            .status()
+            .context("Failed to switch tmux client")?;
+    } else {
+        // Not in tmux — attach
+        Command::new("tmux")
+            .args(["attach", "-t", &session])
+            .status()
+            .context("Failed to attach to tmux session")?;
+    }
+
+    Ok(())
+}
+
+/// Kill the tmux session for a project
+pub fn close_session(project: &str) {
+    let session = session_name(project);
+    let _ = Command::new("tmux")
+        .args(["kill-session", "-t", &session])
+        .output();
+}
+
+fn session_name(project: &str) -> String {
+    format!("on_{project}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_name_format() {
+        assert_eq!(session_name("myproject"), "on_myproject");
+    }
+
+    #[test]
+    fn empty_panes_is_ok() {
+        assert!(open_panes("proj", &[], "vertical").is_ok());
+    }
+}

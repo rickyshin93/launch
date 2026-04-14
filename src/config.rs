@@ -3,16 +3,36 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Raw config as deserialized from YAML (supports both `terminal:` and legacy `iterm:`)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct RawConfig {
+    pub name: String,
+    pub terminal: Option<TerminalConfig>,
+    pub iterm: Option<LegacyItermConfig>,
+    pub editor: Option<EditorConfig>,
+    pub browser: Option<Vec<String>>,
+}
+
+/// Resolved config used by the rest of the application
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub name: String,
-    pub iterm: Option<ItermConfig>,
+    pub terminal: Option<TerminalConfig>,
     pub editor: Option<EditorConfig>,
     pub browser: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ItermConfig {
+pub struct TerminalConfig {
+    #[serde(rename = "type", default = "default_terminal_type")]
+    pub terminal_type: String,
+    pub layout: Option<String>,
+    pub panes: Vec<PaneConfig>,
+}
+
+/// Legacy `iterm:` section (same shape but no `type` field)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LegacyItermConfig {
     pub layout: Option<String>,
     pub panes: Vec<PaneConfig>,
 }
@@ -24,11 +44,32 @@ pub struct PaneConfig {
     pub cmd: Option<String>,
 }
 
+impl PaneConfig {
+    /// Build the shell command string for a pane (shared by iterm and tmux backends)
+    pub fn build_command(&self, project: &str) -> String {
+        match &self.cmd {
+            Some(cmd) => {
+                let pid_file = format!("/tmp/.on_{project}_{}.pid", self.name);
+                format!("cd {} && echo $$ > {pid_file} && exec {cmd}", self.dir)
+            }
+            None => format!("cd {}", self.dir),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct EditorConfig {
     pub cmd: Option<String>,
     pub folders: Option<Vec<String>>,
     pub workspace: Option<String>,
+}
+
+fn default_terminal_type() -> String {
+    if cfg!(target_os = "macos") {
+        "iterm".to_string()
+    } else {
+        "tmux".to_string()
+    }
 }
 
 /// Returns the base directory: ~/.on/
@@ -61,16 +102,37 @@ pub fn load(name: &str) -> Result<Config> {
     }
     let content =
         fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut config: Config = serde_yaml::from_str(&content)
+    let raw: RawConfig = serde_yaml::from_str(&content)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
+    let mut config = resolve_config(raw);
     expand_paths(&mut config);
     Ok(config)
 }
 
+/// Resolve `RawConfig` into `Config`: merge legacy `iterm:` into `terminal:`
+fn resolve_config(raw: RawConfig) -> Config {
+    let terminal = match (raw.terminal, raw.iterm) {
+        (Some(t), _) => Some(t),
+        (None, Some(legacy)) => Some(TerminalConfig {
+            terminal_type: "iterm".to_string(),
+            layout: legacy.layout,
+            panes: legacy.panes,
+        }),
+        (None, None) => None,
+    };
+
+    Config {
+        name: raw.name,
+        terminal,
+        editor: raw.editor,
+        browser: raw.browser,
+    }
+}
+
 /// Expand all ~ paths in the config to absolute paths
 fn expand_paths(config: &mut Config) {
-    if let Some(ref mut iterm) = config.iterm {
-        for pane in &mut iterm.panes {
+    if let Some(ref mut terminal) = config.terminal {
+        for pane in &mut terminal.panes {
             pane.dir = shellexpand::tilde(&pane.dir).to_string();
         }
     }
@@ -108,9 +170,11 @@ pub fn create_template(name: &str) -> Result<PathBuf> {
     if path.exists() {
         bail!("Config already exists: {}", path.display());
     }
+    let terminal_type = default_terminal_type();
     let template = format!(
         r#"name: {name}
-iterm:
+terminal:
+  type: {terminal_type}
   # layout: vertical  # vertical(default) | grid
   panes:
     - name: dev
@@ -133,10 +197,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_full_yaml() {
+    fn parse_new_terminal_format() {
         let yaml = r#"
 name: myproject
-iterm:
+terminal:
+  type: tmux
   layout: grid
   panes:
     - name: frontend
@@ -156,14 +221,16 @@ browser:
   - http://localhost:3000
   - https://github.com/me/myproject
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        let config = resolve_config(raw);
         assert_eq!(config.name, "myproject");
 
-        let iterm = config.iterm.unwrap();
-        assert_eq!(iterm.layout, Some("grid".to_string()));
-        assert_eq!(iterm.panes.len(), 3);
-        assert_eq!(iterm.panes[0].cmd, Some("npm run dev".to_string()));
-        assert_eq!(iterm.panes[2].cmd, None);
+        let terminal = config.terminal.unwrap();
+        assert_eq!(terminal.terminal_type, "tmux");
+        assert_eq!(terminal.layout, Some("grid".to_string()));
+        assert_eq!(terminal.panes.len(), 3);
+        assert_eq!(terminal.panes[0].cmd, Some("npm run dev".to_string()));
+        assert_eq!(terminal.panes[2].cmd, None);
 
         let editor = config.editor.unwrap();
         assert_eq!(editor.cmd, Some("cursor".to_string()));
@@ -173,36 +240,74 @@ browser:
     }
 
     #[test]
+    fn parse_legacy_iterm_format() {
+        let yaml = r#"
+name: myproject
+iterm:
+  layout: grid
+  panes:
+    - name: frontend
+      dir: ~/projects/myproject/frontend
+      cmd: npm run dev
+"#;
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        let config = resolve_config(raw);
+
+        let terminal = config.terminal.unwrap();
+        assert_eq!(terminal.terminal_type, "iterm");
+        assert_eq!(terminal.layout, Some("grid".to_string()));
+        assert_eq!(terminal.panes.len(), 1);
+    }
+
+    #[test]
+    fn terminal_takes_priority_over_iterm() {
+        let yaml = r#"
+name: myproject
+terminal:
+  type: tmux
+  panes:
+    - name: dev
+      dir: /tmp
+iterm:
+  panes:
+    - name: old
+      dir: /tmp
+"#;
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        let config = resolve_config(raw);
+
+        let terminal = config.terminal.unwrap();
+        assert_eq!(terminal.terminal_type, "tmux");
+        assert_eq!(terminal.panes[0].name, "dev");
+    }
+
+    #[test]
     fn parse_minimal_yaml() {
         let yaml = "name: simple\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let raw: RawConfig = serde_yaml::from_str(yaml).unwrap();
+        let config = resolve_config(raw);
         assert_eq!(config.name, "simple");
-        assert!(config.iterm.is_none());
+        assert!(config.terminal.is_none());
         assert!(config.editor.is_none());
         assert!(config.browser.is_none());
     }
 
     #[test]
-    fn parse_roundtrip() {
-        let yaml = r#"
-name: test
-iterm:
-  panes:
-    - name: dev
-      dir: /tmp/test
-      cmd: echo hi
-"#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let serialized = serde_yaml::to_string(&config).unwrap();
-        let config2: Config = serde_yaml::from_str(&serialized).unwrap();
-        assert_eq!(config, config2);
+    fn default_terminal_type_on_current_os() {
+        let t = default_terminal_type();
+        if cfg!(target_os = "macos") {
+            assert_eq!(t, "iterm");
+        } else {
+            assert_eq!(t, "tmux");
+        }
     }
 
     #[test]
     fn expand_tilde_paths() {
         let mut config = Config {
             name: "test".to_string(),
-            iterm: Some(ItermConfig {
+            terminal: Some(TerminalConfig {
+                terminal_type: "tmux".to_string(),
                 layout: None,
                 panes: vec![PaneConfig {
                     name: "dev".to_string(),
@@ -222,8 +327,33 @@ iterm:
 
         let home = dirs::home_dir().unwrap();
         let expected = home.join("projects/test").to_string_lossy().to_string();
-        assert_eq!(config.iterm.unwrap().panes[0].dir, expected);
+        assert_eq!(config.terminal.unwrap().panes[0].dir, expected);
         assert_eq!(config.editor.unwrap().folders.unwrap()[0], expected);
+    }
+
+    #[test]
+    fn build_pane_command_with_cmd() {
+        let pane = PaneConfig {
+            name: "dev".to_string(),
+            dir: "/tmp/test".to_string(),
+            cmd: Some("npm run dev".to_string()),
+        };
+        let cmd = pane.build_command("myproject");
+        assert!(cmd.contains("cd /tmp/test"));
+        assert!(cmd.contains("echo $$"));
+        assert!(cmd.contains(".on_myproject_dev.pid"));
+        assert!(cmd.contains("exec npm run dev"));
+    }
+
+    #[test]
+    fn build_pane_command_without_cmd() {
+        let pane = PaneConfig {
+            name: "shell".to_string(),
+            dir: "/tmp/test".to_string(),
+            cmd: None,
+        };
+        let cmd = pane.build_command("myproject");
+        assert_eq!(cmd, "cd /tmp/test");
     }
 
     #[test]
@@ -258,8 +388,8 @@ iterm:
 
         let config = load(name).unwrap();
         assert_eq!(config.name, name);
-        if let Some(iterm) = &config.iterm {
-            for pane in &iterm.panes {
+        if let Some(terminal) = &config.terminal {
+            for pane in &terminal.panes {
                 assert!(!pane.dir.contains('~'));
             }
         }

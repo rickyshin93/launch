@@ -6,9 +6,10 @@ use std::time::Duration;
 
 use colored::Colorize;
 
-use crate::{browser, config, editor, git, iterm, port, state};
+use crate::{browser, config, editor, git, iterm, port, state, tmux};
 
 /// Main launch flow for a project
+#[allow(clippy::too_many_lines)]
 pub fn run(name: &str) -> Result<()> {
     config::ensure_dirs()?;
     let cfg = config::load(name)?;
@@ -32,8 +33,8 @@ pub fn run(name: &str) -> Result<()> {
     }
 
     // Git status check
-    if let Some(ref iterm_cfg) = cfg.iterm {
-        let dirs: Vec<String> = iterm_cfg.panes.iter().map(|p| p.dir.clone()).collect();
+    if let Some(ref term_cfg) = cfg.terminal {
+        let dirs: Vec<String> = term_cfg.panes.iter().map(|p| p.dir.clone()).collect();
         let dirty = git::check_status(&dirs);
         if !dirty.is_empty() {
             for d in &dirty {
@@ -57,9 +58,9 @@ pub fn run(name: &str) -> Result<()> {
     // Port conflict check
     let urls: Vec<String> = cfg.browser.clone().unwrap_or_default();
     let cmds: Vec<String> = cfg
-        .iterm
+        .terminal
         .as_ref()
-        .map(|i| i.panes.iter().filter_map(|p| p.cmd.clone()).collect())
+        .map(|t| t.panes.iter().filter_map(|p| p.cmd.clone()).collect())
         .unwrap_or_default();
     let ports = port::extract_ports(&urls, &cmds);
 
@@ -93,17 +94,25 @@ pub fn run(name: &str) -> Result<()> {
         }
     }
 
-    // Open iTerm2 panes
-    if let Some(ref iterm_cfg) = cfg.iterm {
-        let layout = iterm_cfg.layout.as_deref().unwrap_or("vertical");
-        iterm::open_panes(name, &iterm_cfg.panes, layout)?;
+    let mut terminal_type = String::new();
+
+    // Open terminal panes
+    if let Some(ref term_cfg) = cfg.terminal {
+        let layout = term_cfg.layout.as_deref().unwrap_or("vertical");
+        terminal_type.clone_from(&term_cfg.terminal_type);
+
+        match term_cfg.terminal_type.as_str() {
+            "tmux" => tmux::open_panes(name, &term_cfg.panes, layout)?,
+            _ => iterm::open_panes(name, &term_cfg.panes, layout)?,
+        }
 
         // Collect PIDs from pid files
-        let pane_states = collect_pids(name, &iterm_cfg.panes);
+        let pane_states = collect_pids(name, &term_cfg.panes);
         if !pane_states.is_empty() {
             let project_state = state::ProjectState {
                 project: name.to_string(),
                 started_at: chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+                terminal_type: terminal_type.clone(),
                 panes: pane_states,
             };
             state::save(&project_state)?;
@@ -116,11 +125,18 @@ pub fn run(name: &str) -> Result<()> {
     // Open browser
     browser::open(cfg.browser.as_ref())?;
 
-    println!("{}", format!("Project '{name}' is on!").green());
+    // For tmux, attach last (this blocks)
+    if terminal_type == "tmux" {
+        println!("{}", format!("Attaching to tmux session for '{name}'...").green());
+        tmux::attach(name)?;
+    } else {
+        println!("{}", format!("Project '{name}' is on!").green());
+    }
+
     Ok(())
 }
 
-/// Poll for PID files after iTerm2 panes are opened
+/// Poll for PID files after terminal panes are opened
 fn collect_pids(project: &str, panes: &[config::PaneConfig]) -> Vec<state::PaneState> {
     let mut results = Vec::new();
 
@@ -155,7 +171,7 @@ fn poll_pid_file(path: &str) -> Option<u32> {
     None
 }
 
-/// Stop a project: kill processes, close iTerm2 tabs, remove state
+/// Stop a project: kill processes, close terminal, remove state
 pub fn stop(name: &str) -> Result<()> {
     match state::load(name)? {
         None => {
@@ -164,10 +180,13 @@ pub fn stop(name: &str) -> Result<()> {
         }
         Some(s) => {
             kill_all_process_groups(&s.panes);
+            match s.terminal_type.as_str() {
+                "tmux" => tmux::close_session(name),
+                _ => iterm::close_tabs(name),
+            }
         }
     }
 
-    iterm::close_tabs(name);
     state::remove(name)?;
     println!("{}", format!("Project '{name}' stopped.").green());
     Ok(())
@@ -269,7 +288,7 @@ pub fn edit(name: &str) -> Result<()> {
     let path = config::config_path(name);
     if !path.exists() {
         bail!(
-            "Config not found: {}\nRun `launch new {name}` to create one.",
+            "Config not found: {}\nRun `on new {name}` to create one.",
             path.display(),
         );
     }
@@ -302,11 +321,21 @@ pub fn doctor() -> Result<()> {
 
     println!("on doctor\n");
 
-    // Check iTerm2
-    let iterm_installed = Path::new("/Applications/iTerm.app").exists();
-    print_check(iterm_installed, "iTerm2 installed");
+    // Check iTerm2 (macOS only)
+    if cfg!(target_os = "macos") {
+        let iterm_installed = Path::new("/Applications/iTerm.app").exists();
+        print_check(iterm_installed, "iTerm2 installed");
+    }
 
-    // Check ~/.launch/ directory
+    // Check tmux
+    let tmux_ok = Command::new("tmux")
+        .arg("-V")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    print_check(tmux_ok, "tmux available");
+
+    // Check ~/.on/ directory
     let on_dir_exists = config::base_dir().exists();
     print_check(on_dir_exists, "~/.on/ directory exists");
 
@@ -331,7 +360,7 @@ pub fn doctor() -> Result<()> {
     print_check(lsof_ok, "lsof available");
 
     println!();
-    if iterm_installed && git_ok && lsof_ok {
+    if tmux_ok && git_ok && lsof_ok {
         println!("{}", "All checks passed!".green());
     } else {
         println!("{}", "Some checks failed. See above.".yellow());

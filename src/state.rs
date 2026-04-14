@@ -10,7 +10,13 @@ use crate::config;
 pub struct ProjectState {
     pub project: String,
     pub started_at: String,
+    #[serde(default = "default_terminal_type")]
+    pub terminal_type: String,
     pub panes: Vec<PaneState>,
+}
+
+fn default_terminal_type() -> String {
+    "iterm".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -99,6 +105,7 @@ mod tests {
         ProjectState {
             project: "_on_test_state".to_string(),
             started_at: "2026-04-12T10:00:00".to_string(),
+            terminal_type: "iterm".to_string(),
             panes: vec![
                 PaneState {
                     name: "frontend".to_string(),

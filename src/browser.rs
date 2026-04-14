@@ -1,14 +1,23 @@
 use anyhow::{Context, Result};
 use std::process::Command;
 
-/// Open a list of URLs in the default browser using `open` command.
+fn open_command() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    }
+}
+
+/// Open a list of URLs in the default browser.
 pub fn open(urls: Option<&Vec<String>>) -> Result<()> {
     let Some(urls) = urls.filter(|u| !u.is_empty()) else {
         return Ok(());
     };
 
+    let cmd = open_command();
     for url in urls {
-        Command::new("open")
+        Command::new(cmd)
             .arg(url)
             .spawn()
             .with_context(|| format!("Failed to open URL '{url}'"))?;

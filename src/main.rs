@@ -6,6 +6,7 @@ mod iterm;
 mod port;
 mod process;
 mod state;
+mod tmux;
 
 use anyhow::{anyhow, bail, Result};
 use clap::{CommandFactory, Parser, Subcommand};
