@@ -163,9 +163,7 @@ pub fn stop(name: &str) -> Result<()> {
             return Ok(());
         }
         Some(s) => {
-            for pane in &s.panes {
-                kill_process_group(pane.pid);
-            }
+            kill_all_process_groups(&s.panes);
         }
     }
 
@@ -188,10 +186,32 @@ pub fn stop_all() -> Result<()> {
     Ok(())
 }
 
-/// Kill a process group: SIGTERM first, wait 3s, then SIGKILL if needed
-#[allow(clippy::similar_names)]
-fn kill_process_group(pid: u32) {
-    let pgid = Command::new("ps")
+/// Kill all process groups in parallel: SIGTERM all, wait once, then SIGKILL survivors
+fn kill_all_process_groups(panes: &[state::PaneState]) {
+    let targets: Vec<(u32, String)> = panes
+        .iter()
+        .map(|p| (p.pid, resolve_kill_target(p.pid)))
+        .collect();
+
+    // SIGTERM all at once
+    for (_, target) in &targets {
+        let _ = Command::new("kill").args(["--", target]).output();
+    }
+
+    // Single wait
+    thread::sleep(Duration::from_millis(300));
+
+    // SIGKILL any survivors
+    for (pid, target) in &targets {
+        if state::is_pid_alive(*pid) {
+            let _ = Command::new("kill").args(["-9", "--", target]).output();
+        }
+    }
+}
+
+/// Resolve a PID to its process group kill target
+fn resolve_kill_target(pid: u32) -> String {
+    Command::new("ps")
         .args(["-o", "pgid=", "-p", &pid.to_string()])
         .output()
         .ok()
@@ -201,22 +221,12 @@ fn kill_process_group(pid: u32) {
                     .trim()
                     .parse::<u32>()
                     .ok()
+                    .map(|g| format!("-{g}"))
             } else {
                 None
             }
-        });
-
-    let target = match pgid {
-        Some(g) => format!("-{g}"),
-        None => pid.to_string(),
-    };
-
-    let _ = Command::new("kill").args(["--", &target]).output();
-    thread::sleep(Duration::from_secs(3));
-
-    if state::is_pid_alive(pid) {
-        let _ = Command::new("kill").args(["-9", "--", &target]).output();
-    }
+        })
+        .unwrap_or_else(|| pid.to_string())
 }
 
 /// List all projects and their status
