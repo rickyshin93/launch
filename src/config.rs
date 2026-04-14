@@ -28,6 +28,7 @@ pub struct PaneConfig {
 pub struct EditorConfig {
     pub cmd: Option<String>,
     pub folders: Option<Vec<String>>,
+    pub workspace: Option<String>,
 }
 
 /// Returns the base directory: ~/.on/
@@ -212,6 +213,7 @@ iterm:
             editor: Some(EditorConfig {
                 cmd: None,
                 folders: Some(vec!["~/projects/test".to_string()]),
+                workspace: None,
             }),
             browser: None,
         };

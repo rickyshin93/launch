@@ -3,19 +3,28 @@ use std::process::Command;
 
 use crate::config::EditorConfig;
 
-/// Open editor with the configured folders.
-/// Skips if editor section is None or folders is empty.
+/// Open editor with workspace file or configured folders.
+/// Workspace takes priority over folders if both are set.
 pub fn open(editor: Option<&EditorConfig>) -> Result<()> {
     let Some(editor) = editor else {
         return Ok(());
     };
 
+    let cmd = editor.cmd.as_deref().unwrap_or("code");
+
+    if let Some(ref workspace) = editor.workspace {
+        let expanded = shellexpand::tilde(workspace).to_string();
+        Command::new(cmd)
+            .arg(&expanded)
+            .spawn()
+            .with_context(|| format!("Failed to open workspace '{expanded}' with '{cmd}'"))?;
+        return Ok(());
+    }
+
     let folders = match &editor.folders {
         Some(f) if !f.is_empty() => f,
         _ => return Ok(()),
     };
-
-    let cmd = editor.cmd.as_deref().unwrap_or("code");
 
     Command::new(cmd)
         .args(folders)
@@ -39,6 +48,7 @@ mod tests {
         let editor = EditorConfig {
             cmd: Some("code".to_string()),
             folders: Some(vec![]),
+            workspace: None,
         };
         assert!(open(Some(&editor)).is_ok());
     }
@@ -48,6 +58,7 @@ mod tests {
         let editor = EditorConfig {
             cmd: Some("code".to_string()),
             folders: None,
+            workspace: None,
         };
         assert!(open(Some(&editor)).is_ok());
     }
