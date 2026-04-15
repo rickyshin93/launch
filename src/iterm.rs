@@ -105,7 +105,9 @@ fn build_grid_script(project: &str, panes: &[PaneConfig]) -> String {
 fn append_pane_config(s: &mut String, project: &str, pane: &PaneConfig, index: usize) {
     let title = format!("[{project}] {}", pane.name);
     let cmd = pane.build_command(project);
-    let escaped_cmd = cmd.replace('\\', "\\\\").replace('"', "\\\"");
+    // \e]1; sets the tab title (to project name), \e]2; sets the pane title (to pane name)
+    let full_cmd = format!("printf '\\e]1;{project}\\a\\e]2;{}\\a'; {cmd}", pane.name);
+    let escaped_cmd = full_cmd.replace('\\', "\\\\").replace('"', "\\\"");
     s.push_str(&format!("    tell item {index} of sessions of theTab\n"));
     s.push_str(&format!("      set name to \"{title}\"\n"));
     s.push_str(&format!("      write text \"{escaped_cmd}\"\n"));

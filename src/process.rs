@@ -205,16 +205,23 @@ pub fn stop_all() -> Result<()> {
     Ok(())
 }
 
-/// Kill all process groups in parallel: SIGTERM all, wait once, then SIGKILL survivors
+/// Kill all process trees: SIGTERM groups + children, wait, then SIGKILL survivors
 fn kill_all_process_groups(panes: &[state::PaneState]) {
     let targets: Vec<(u32, String)> = panes
         .iter()
         .map(|p| (p.pid, resolve_kill_target(p.pid)))
         .collect();
 
-    // SIGTERM all at once
+    // SIGTERM all process groups at once
     for (_, target) in &targets {
         let _ = Command::new("kill").args(["--", target]).output();
+    }
+
+    // Also SIGTERM child processes (command may be in a different process group)
+    for (pid, _) in &targets {
+        let _ = Command::new("pkill")
+            .args(["-TERM", "-P", &pid.to_string()])
+            .output();
     }
 
     // Single wait
@@ -225,6 +232,9 @@ fn kill_all_process_groups(panes: &[state::PaneState]) {
         if state::is_pid_alive(*pid) {
             let _ = Command::new("kill").args(["-9", "--", target]).output();
         }
+        let _ = Command::new("pkill")
+            .args(["-9", "-P", &pid.to_string()])
+            .output();
     }
 }
 

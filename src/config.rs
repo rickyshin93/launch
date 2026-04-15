@@ -50,7 +50,7 @@ impl PaneConfig {
         match &self.cmd {
             Some(cmd) => {
                 let pid_file = format!("/tmp/.on_{project}_{}.pid", self.name);
-                format!("cd {} && echo $$ > {pid_file} && exec {cmd}", self.dir)
+                format!("cd {} && echo $$ > {pid_file} && {cmd}", self.dir)
             }
             None => format!("cd {}", self.dir),
         }
@@ -173,19 +173,39 @@ pub fn create_template(name: &str) -> Result<PathBuf> {
     let terminal_type = default_terminal_type();
     let template = format!(
         r#"name: {name}
+
+# Terminal panes — each pane opens in its own split
 terminal:
-  type: {terminal_type}
-  # layout: vertical  # vertical(default) | grid
+  type: {terminal_type}       # iterm (macOS default) | tmux (Linux default)
+  layout: vertical             # vertical (side-by-side) | grid (tiled)
   panes:
-    - name: dev
+    - name: server
       dir: ~/projects/{name}
-      cmd: echo "hello"
+      cmd: echo "replace with your start command"
+    # - name: frontend
+    #   dir: ~/projects/{name}/frontend
+    #   cmd: pnpm dev
+    # - name: backend
+    #   dir: ~/projects/{name}/backend
+    #   cmd: uv run python src/main.py
+    # - name: watch
+    #   dir: ~/projects/{name}
+    #   cmd: watchexec -e py,ts -- echo "changed"
+    - name: shell
+      dir: ~/projects/{name}
+
+# Editor — opens your IDE with project folders or a workspace
 editor:
-  # cmd: code  # default: code
+  cmd: code                    # code | cursor | qoder | vim | ...
   folders:
     - ~/projects/{name}
+  # workspace: ~/.on/{name}.code-workspace
+
+# Browser — opens URLs in your default browser
 # browser:
 #   - http://localhost:3000
+#   - http://localhost:8080/docs
+#   - https://github.com/you/{name}
 "#,
     );
     fs::write(&path, &template).with_context(|| format!("Failed to write {}", path.display()))?;
@@ -342,7 +362,8 @@ iterm:
         assert!(cmd.contains("cd /tmp/test"));
         assert!(cmd.contains("echo $$"));
         assert!(cmd.contains(".on_myproject_dev.pid"));
-        assert!(cmd.contains("exec npm run dev"));
+        assert!(cmd.contains("npm run dev"));
+        assert!(!cmd.contains("exec"));
     }
 
     #[test]
