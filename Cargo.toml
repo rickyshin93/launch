@@ -29,6 +29,14 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0"
 anyhow = "1.0"
 
+[package.metadata.release]
+publish = false              # not publishing to crates.io
+push = true
+push-remote = "origin"
+tag-prefix = "v"
+tag-name = "v{{version}}"
+pre-release-commit-message = "chore: release v{{version}}"
+
 [lints.rust]
 unsafe_code = "forbid"
 

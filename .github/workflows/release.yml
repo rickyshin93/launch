@@ -39,3 +39,68 @@ jobs:
           files: |
             target/release/on-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
             target/release/on-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
+
+  update-homebrew:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download sha256 checksums
+        run: |
+          VERSION=${{ github.ref_name }}
+          gh release download "$VERSION" \
+            --repo "${{ github.repository }}" \
+            --pattern '*.sha256' \
+            --dir checksums
+          echo "DARWIN_SHA256=$(awk '{print $1}' checksums/on-${VERSION}-aarch64-apple-darwin.tar.gz.sha256)" >> $GITHUB_ENV
+          echo "LINUX_SHA256=$(awk '{print $1}' checksums/on-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256)" >> $GITHUB_ENV
+          echo "VERSION_NUM=${VERSION#v}" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate formula
+        run: |
+          VERSION=${{ github.ref_name }}
+          cat > on.rb << FORMULA
+          class On < Formula
+            desc "A CLI tool to launch your dev environment with one command"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${VERSION_NUM}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/on-${VERSION}-aarch64-apple-darwin.tar.gz"
+                sha256 "${DARWIN_SHA256}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/${{ github.repository }}/releases/download/${VERSION}/on-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${LINUX_SHA256}"
+              end
+            end
+
+            def install
+              bin.install "on"
+            end
+
+            test do
+              assert_match "on", shell_output("#{bin}/on --help")
+            end
+          end
+          FORMULA
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' on.rb
+
+      - name: Update homebrew tap
+        run: |
+          FORMULA_CONTENT=$(base64 -w 0 on.rb)
+          EXISTING_SHA=$(gh api repos/rickyshin93/homebrew-tap/contents/Formula/on.rb --jq '.sha')
+          gh api repos/rickyshin93/homebrew-tap/contents/Formula/on.rb \
+            -X PUT \
+            -f message="chore: bump on to ${{ github.ref_name }}" \
+            -f content="$FORMULA_CONTENT" \
+            -f sha="$EXISTING_SHA"
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
