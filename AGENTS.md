@@ -58,6 +58,20 @@ cargo release major --execute --no-confirm   # 0.3.2 → 1.0.0
 
 **不需要手动更新 homebrew formula，CI 全自动处理。**
 
+## Common Clippy Pitfalls
+
+CI runs `cargo clippy -- -D warnings`，以下模式会报错：
+
+| 错误写法 | 正确写法 |
+|---|---|
+| `.map(\|o\| o.status.success()).unwrap_or(false)` | `.is_ok_and(\|o\| o.status.success())` |
+| `.map(\|_\| true).unwrap_or(false)` | `.is_ok_and(\|_\| true)` |
+
+## Adding Fields to Config Struct
+
+`Config` 在测试中有手动构造的地方（`config.rs` 中的 `expand_tilde_paths` 测试等）。
+每次给 `Config` 或其子 struct 新增字段时，必须同步更新所有手动构造的实例，补上新字段（通常是 `new_field: None`），否则 CI 编译会报 `missing field` 错误。
+
 ## Notes
 
 - Config path: `~/.on/<project>.yaml`

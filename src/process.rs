@@ -375,10 +375,7 @@ pub fn doctor() -> Result<()> {
     print_check(git_ok, "git available");
 
     // Check lsof
-    let lsof_ok = Command::new("lsof")
-        .arg("-v")
-        .output()
-        .is_ok_and(|_| true);
+    let lsof_ok = Command::new("lsof").arg("-v").output().is_ok_and(|_| true);
     print_check(lsof_ok, "lsof available");
 
     println!();

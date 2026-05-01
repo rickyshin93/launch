@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "command": "if cargo fmt --check 2>&1 && cargo clippy -- -D warnings 2>&1 && cargo test --quiet 2>&1; then true; else echo '{\"continue\": false, \"stopReason\": \"CI 检查失败，请先修复 cargo fmt / clippy / test 错误\"}'; fi",
+            "timeout": 120,
+            "statusMessage": "Running CI checks before commit..."
+          }
+        ]
+      }
+    ]
+  }
+}
