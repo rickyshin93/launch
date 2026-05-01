@@ -371,6 +371,7 @@ iterm:
                 workspace: None,
             }),
             browser: None,
+            checks: None,
         };
 
         expand_paths(&mut config);
